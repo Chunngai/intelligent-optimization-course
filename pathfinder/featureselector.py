@@ -7,11 +7,9 @@ __maintainer__ = 'Alberto Ortega'
 __email__ = 'aoruiz@ugr.es'
 
 import sys
-import time
 
 import numpy as np
 import pandas as pd
-import scipy.io as sp
 from sklearn.feature_selection import SelectKBest
 from sklearn.feature_selection import f_classif
 from sklearn.metrics import cohen_kappa_score
@@ -37,7 +35,7 @@ import warnings
 warnings.warn = warn
 
 
-class FeatureSelector:
+class ACOFeatureSelector:
     """Class for Ant System Optimization algorithm designed for Feature Selection.
 
     :param dtype: Format of the dataset.
@@ -45,256 +43,225 @@ class FeatureSelector:
     :param class_training: Path to the training classes file (mat).
     :param data_testing: Path to the testing data file (mat).
     :param class_testing: Path to the testing classes file (mat).
-    :param numberAnts: Number of ants of the colonies.
-    :param iterations: Number of colonies of the algorithm.
-    :param n_features: Number of features to be selected.
+    :param n_ants: Number of ants of the colonies.
+    :param n_iterations: Number of colonies of the algorithm.
+    :param n_selected_features: Number of features to be selected.
     :param alpha: Parameter which determines the weight of tau.
     :param beta: Parameter which determines the weight of eta.
-    :param Q_constant: Parameter for the pheromones update function.
-    :param initialPheromone: Initial value for the pheromones.
-    :param evaporationRate: Rate of the pheromones evaporation.
+    :param q: Parameter for the pheromones update function.
+    :param initial_pheromone: Initial value for the pheromones.
+    :param rho: Rate of the pheromones evaporation.
     :type dtype: MAT or CSV
     :type data_training_name: Numpy array
-    :type class_training: Numpy array
+    :type training_ys: Numpy array
     :type data_testing: Numpy array
-    :type class_testing: Numpy array
-    :type numberAnts: Integer
-    :type iterations: Integer
-    :type n_features: Integer
+    :type testing_ys: Numpy array
+    :type n_ants: Integer
+    :type n_iterations: Integer
+    :type n_selected_features: Integer
     :type alpha: Float
     :type beta: Float
-    :type Q_constant: Float
-    :type initialPheromone: Float
-    :type evaporationRate: Float
+    :type q: Float
+    :type initial_pheromone: Float
+    :type rho: Float
 
     """
 
-    def __init__(self, dtype="mat", data_training_name=None, class_training_name=None, numberAnts=1, iterations=1,
-                 n_features=1, data_testing_name=None, class_testing_name=None, alpha=1, beta=1, Q_constant=1,
-                 initialPheromone=1.0, evaporationRate=0.1, model_class=None):
-        """Constructor method.
-        """
-        time_dataread_start = time.time()
-        if dtype == "mat":
-            dic_data_training = sp.loadmat(data_training_name)
-            dic_class_training = sp.loadmat(class_training_name)
-            self.data_training = np.array(dic_data_training["data"])
-            self.class_training = np.reshape(np.array(dic_class_training["class"]), len(self.data_training)) - 1
+    def __init__(
+            self, fp_data: str, n_selected_features: int, model_class,
+            n_ants: int, n_iterations: int,
+            alpha: int = 1, beta: int = 1, q: int = 1, initial_pheromone: float = 1.0, rho: float = 0.1,
+    ):
+        # Read data.
+        df = pd.read_csv(fp_data)
+        df = df.loc[:, ~(df == df.iloc[0]).all()]  # Remove columns with identical values.
+        df = df.to_numpy()
+        classes = df[:, -1].astype(int)
+        df = np.delete(df, -1, 1)
 
-            dic_data_testing = sp.loadmat(data_testing_name)
-            dic_class_testing = sp.loadmat(class_testing_name)
-            self.data_testing = np.array(dic_data_testing["data"])
-            self.class_testing = np.reshape(np.array(dic_class_testing["class"]), len(self.data_testing)) - 1
+        # Train/test split.
+        (
+            self.training_xs, self.testing_xs,
+            self.training_ys, self.testing_ys
+        ) = train_test_split(
+            df,
+            classes,
+            random_state=42
+        )
+        self.n_all_features = len(self.training_xs[0])
 
-            # Free dictionaries memory
-            del dic_data_training
-            del dic_class_training
+        self.n_selected_features = n_selected_features
+        if self.n_selected_features > self.n_all_features:
+            self.n_selected_features = self.n_all_features
 
-        elif dtype == "csv":
-            df = pd.read_csv(data_training_name)
-            df = df.loc[:, ~(df == df.iloc[0]).all()]  # Remove columns with identical values.
-            df = df.to_numpy()
-            classes = df[:, -1].astype(int)
-            df = np.delete(df, -1, 1)
-            self.data_training, self.data_testing, self.class_training, self.class_testing = train_test_split(df,
-                                                                                                              classes,
-                                                                                                              random_state=42)
-
-        # print("Samples x features:", np.shape(self.dataset))
-
-        scaler = StandardScaler().fit(self.data_training)
-        self.data_training = scaler.transform(self.data_training)
-        self.data_testing = scaler.transform(self.data_testing)
-
-        self.number_ants = numberAnts
-        self.ants = [Ant() for _ in range(self.number_ants)]
-        self.number_features = len(self.data_training[0])
-        self.iterations = iterations
-        self.initial_pheromone = initialPheromone
-        self.evaporation_rate = evaporationRate
-        self.alpha = alpha
-        self.beta = beta
-        self.Q_constant = Q_constant
-        self.feature_pheromone = np.full(self.number_features, self.initial_pheromone)
-        self.unvisited_features = np.arange(self.number_features)
-        self.ant_accuracy = np.zeros(self.number_ants)
-        self.n_features = n_features
-        if self.n_features > self.number_features:
-            self.n_features = self.number_features
-        # random.seed(1) ########################################################################
-
-        time_dataread_stop = time.time()
-        self.time_dataread = time_dataread_stop - time_dataread_start
-        self.time_LUT = 0
-        self.time_reset = 0
-        self.time_localsearch = 0
-        self.time_pheromonesupdate = 0
+        # Scale features.
+        scaler = StandardScaler().fit(self.training_xs)
+        self.training_xs = scaler.transform(self.training_xs)
+        self.testing_xs = scaler.transform(self.testing_xs)
 
         self.model_class = model_class
 
-    def defineLUT(self):
+        self.n_ants = n_ants
+        self.n_iterations = n_iterations
+
+        self.alpha = alpha
+        self.beta = beta
+        self.q = q
+        self.initial_pheromone = initial_pheromone
+        self.rho = rho
+
+        self.ants = None
+        self.ant_accuracy_list = np.zeros(self.n_ants)
+        self.unvisited_feature_indexes = None
+
+        self.feature_pheromone = np.full(self.n_all_features, self.initial_pheromone)
+
+        self.lut = None
+
+    def define_lut(self):
         """Defines the Look-Up Table (LUT) for the algorithm.
         """
-        time_LUT_start = time.time()
 
-        fs = SelectKBest(score_func=f_classif, k='all')
-        fs.fit(self.data_training, self.class_training)
-        self.LUT = fs.scores_
-        sum = np.sum(self.LUT)
-        for i in range(len(fs.scores_)):
-            self.LUT[i] = self.LUT[i] / sum
+        kbest = SelectKBest(
+            score_func=f_classif,
+            k='all'
+        )
+        kbest.fit(self.training_xs, self.training_ys)
 
-        time_LUT_stop = time.time()
-        self.time_LUT = self.time_LUT + (time_LUT_stop - time_LUT_start)
+        # Normalization.
+        self.lut = kbest.scores_
+        sum_ = np.sum(self.lut)
+        for i in range(len(kbest.scores_)):
+            self.lut[i] = self.lut[i] / sum_
 
-    def redefineLUT(self, feature):
+    def redefine_lut(self, feature):
         """Re-defines the Look-Up Table (LUT) for the algorithm.
         """
-        time_LUT_start = time.time()
 
-        weightprob = self.LUT[feature]
-        self.LUT[feature] = 0
-        mult = 1 / (1 - weightprob)
-        self.LUT = self.LUT * mult
+        weight_prob = self.lut[feature]
+        self.lut[feature] = 0
+        mult = 1 / (1 - weight_prob)
+        self.lut = self.lut * mult
 
-        time_LUT_stop = time.time()
-        self.time_LUT = self.time_LUT + (time_LUT_stop - time_LUT_start)
-
-    def resetInitialValues(self):
+    def reset_initial_values(self):
         """Initialize the ant array and assign each one a random initial feature.
         """
-        time_reset_start = time.time()
 
-        self.ants = [Ant() for _ in range(self.number_ants)]
-        initialFeaturesValues = np.arange(self.number_features)
-        for i in range(self.number_ants):
-            rand = np.random.choice(initialFeaturesValues, 1, p=self.LUT)[0]
-            self.ants[i].feature_path.append(rand)
-            actual_features_list = self.ants[i].feature_path
-            actual_subset = np.array(self.data_training[:, actual_features_list])
-            actual_classifier = self.model_class()
-            actual_classifier.fit(actual_subset, self.class_training)
-            scores = cross_val_score(actual_classifier, actual_subset, self.class_training, cv=5)
-            actual_accuracy = scores.mean()
-            np.put(self.ant_accuracy, i, actual_accuracy)
+        self.ants = [Ant() for _ in range(self.n_ants)]
+        all_feature_indexes = np.arange(self.n_all_features)
+        for i in range(self.n_ants):
+            random_feature_index = np.random.choice(all_feature_indexes, 1, p=self.lut)[0]
+            self.ants[i].feature_path.append(random_feature_index)
 
-        time_reset_stop = time.time()
-        self.time_reset = self.time_reset + (time_reset_stop - time_reset_start)
+            ant_feature_indexes = self.ants[i].feature_path
+            ant_xs = np.array(self.training_xs[:, ant_feature_indexes])
 
-    def antBuildSubset(self, index_ant):
+            model = self.model_class()
+            model.fit(ant_xs, self.training_ys)
+            scores = cross_val_score(model, ant_xs, self.training_ys, cv=5)
+            ant_acc = scores.mean()
+
+            np.put(self.ant_accuracy_list, i, ant_acc)
+
+    def ant_build_subset(self, index_ant):
         """Global and local search for the ACO algorithm. It completes the subset of features of the ant searching.
 
         :param index_ant: Ant that is going to do the local search.
         :type index_ant: Integer
         """
-        time_localsearch_start = time.time()
 
         # Initialize unvisited features and it removes the first of the ant actual subset
-        self.unvisited_features = np.arange(self.number_features)
-        indexes = np.where(np.in1d(self.unvisited_features, self.ants[index_ant].feature_path))[0]
-        self.unvisited_features = np.delete(self.unvisited_features, indexes)
-        self.defineLUT()
+        all_feature_indexes = np.arange(self.n_all_features)
+        visited_feature_indexes = np.where(np.in1d(
+            all_feature_indexes,
+            self.ants[index_ant].feature_path
+        ))[0]
+        self.unvisited_feature_indexes = np.delete(all_feature_indexes, visited_feature_indexes)
 
-        n = 1
-        while n < self.n_features:
-            # Initialize parameters
-            p = np.zeros(np.size(self.unvisited_features))
-            p_num = np.zeros(np.size(self.unvisited_features))
+        self.define_lut()
 
-            # Compute eta, tau and the numerator for each unvisited feature 
-            for index_uf in range(len(self.unvisited_features)):
-                eta = self.LUT[self.unvisited_features[index_uf]]
-                tau = self.feature_pheromone[index_uf]
-                np.put(p_num, index_uf, (tau ** self.alpha) * (eta ** self.beta))
+        for n in range(self.n_selected_features):
+            # Compute eta, tau and the numerator for each unvisited feature
+            probs = np.zeros(np.size(self.unvisited_feature_indexes))
+            for unvisited_feature_index in range(len(self.unvisited_feature_indexes)):
+                eta = self.lut[self.unvisited_feature_indexes[unvisited_feature_index]]
+                tau = self.feature_pheromone[unvisited_feature_index]
 
-            den = np.sum(p_num)
-            for index_uf in range(len(self.unvisited_features)):
-                p[index_uf] = p_num[index_uf] / den
-            next_feature = np.random.choice(self.unvisited_features, 1, p=p)[0]
+                np.put(probs, unvisited_feature_index, (tau ** self.alpha) * (eta ** self.beta))
 
-            if (n == self.n_features - 1):
-                new_features_list = np.array(self.ants[index_ant].feature_path)
-                new_features_list = np.append(new_features_list, next_feature)
-                new_subset = np.array(self.data_training[:, new_features_list])
-                new_classifier = self.model_class()
-                new_classifier.fit(new_subset, self.class_training)
-                scores = cross_val_score(new_classifier, new_subset, self.class_training, cv=5)
-                new_accuracy = scores.mean()
+            sum_ = np.sum(probs)
+            for unvisited_feature_index in range(len(self.unvisited_feature_indexes)):
+                probs[unvisited_feature_index] = probs[unvisited_feature_index] / sum_
+            next_feature = np.random.choice(self.unvisited_feature_indexes, 1, p=probs)[0]
 
             # Choose the feature with best probability and add to the ant subset
             self.ants[index_ant].feature_path.append(next_feature)
             # Remove the chosen feature of the unvisited features
-            self.unvisited_features = np.delete(self.unvisited_features,
-                                                np.where(self.unvisited_features == next_feature))
-            if (n == self.n_features - 1):
-                np.put(self.ant_accuracy, index_ant, new_accuracy)
-            self.redefineLUT(next_feature)
-            n = n + 1
+            self.unvisited_feature_indexes = np.delete(
+                self.unvisited_feature_indexes,
+                np.where(self.unvisited_feature_indexes == next_feature)
+            )
 
-        time_localsearch_stop = time.time()
-        self.time_localsearch = self.time_localsearch + (time_localsearch_stop - time_localsearch_start)
+            self.redefine_lut(next_feature)
 
-    def updatePheromones(self):
+        ant_features_indexes = np.array(self.ants[index_ant].feature_path)
+        ant_xs = np.array(self.training_xs[:, ant_features_indexes])
+
+        model = self.model_class()
+        model.fit(ant_xs, self.training_ys)
+        scores = cross_val_score(model, ant_xs, self.training_ys, cv=5)
+        new_ant_acc = scores.mean()
+
+        np.put(self.ant_accuracy_list, index_ant, new_ant_acc)
+
+    def update_pheromones(self):
         """Update the pheromones trail depending on which variant of the algorithm it is selected.
         """
-        time_pheromonesupdate_start = time.time()
 
-        for f in self.ants[np.argmax(self.ant_accuracy)].feature_path:
-            sum_delta = 0
-            sum_delta += self.Q_constant / ((1 - self.ant_accuracy[np.argmax(self.ant_accuracy)]) * 100)
+        for selected_feature_index in self.ants[np.argmax(self.ant_accuracy_list)].feature_path:
+            sum_delta = self.q / ((1 - np.max(self.ant_accuracy_list)) * 100)
 
-            updated_pheromone = (1 - self.evaporation_rate) * self.feature_pheromone[f] + sum_delta
-            if (updated_pheromone < 0.4):
+            updated_pheromone = (1 - self.rho) * self.feature_pheromone[selected_feature_index] + sum_delta
+            if updated_pheromone < 0.4:
                 updated_pheromone = 0.4
-            # print(updated_pheromone)
-            np.put(self.feature_pheromone, f, updated_pheromone)
+            np.put(self.feature_pheromone, selected_feature_index, updated_pheromone)
 
-        time_pheromonesupdate_stop = time.time()
-        self.time_pheromonesupdate = self.time_pheromonesupdate + (
-                    time_pheromonesupdate_stop - time_pheromonesupdate_start)
+    def select_features(self):
+        self.define_lut()
+        for _ in tqdm(range(self.n_iterations)):
+            self.reset_initial_values()
+            for ant_index in range(self.n_ants):
+                self.ant_build_subset(ant_index)
+            self.update_pheromones()
 
-    def acoFS(self):
-        """Compute the original ACO algorithm workflow. Firstly it resets the values of the ants (:py:meth:`featureselector.FeatureSelector.resetInitialValues`), 
-        """
+        return self.evaluate()
 
-        self.defineLUT()
-        for c in tqdm(range(self.iterations)):
-            self.resetInitialValues()
-            # print("Colony", c, ":")
-            ia = 0
-            for ia in range(self.number_ants):
-                self.antBuildSubset(ia)
-                # print("\tAnt", ia, ":")
-                # print("\t\tPath:" ,self.ants[ia].feature_path)
-                # print("\t\tCV-Acuraccy:", self.ant_accuracy[ia])
-            self.updatePheromones()
-            # print("\t\tPheromones:", self.feature_pheromone)
-
-    def printTestingResults(self):
+    def evaluate(self):
         """Function for printing the entire summary of the algorithm, including the test results.
         """
+
         # print("The final subset of features is: ",self.ants[np.argmax(self.ant_accuracy)].feature_path)
         # print("Number of features: ",len(self.ants[np.argmax(self.ant_accuracy)].feature_path))
 
         model_before = self.model_class()
-        model_before.fit(self.data_training, self.class_training)
-        outputs_before = model_before.predict(self.data_testing)
+        model_before.fit(self.training_xs, self.training_ys)
+        outputs_before = model_before.predict(self.testing_xs)
         qwk_before = cohen_kappa_score(
-            y1=self.class_testing,
+            y1=self.testing_ys,
             y2=outputs_before,
             weights="quadratic",
         )
 
-        data_training_subset = self.data_training[:, self.ants[np.argmax(self.ant_accuracy)].feature_path]
-        data_testing_subset = self.data_testing[:, self.ants[np.argmax(self.ant_accuracy)].feature_path]
+        data_training_subset = self.training_xs[:, self.ants[np.argmax(self.ant_accuracy_list)].feature_path]
+        data_testing_subset = self.testing_xs[:, self.ants[np.argmax(self.ant_accuracy_list)].feature_path]
 
         # print("Subset of features dataset accuracy:")
 
         model_after = self.model_class()
-        model_after.fit(data_training_subset, self.class_training)
+        model_after.fit(data_training_subset, self.training_ys)
         outputs_after = model_after.predict(data_testing_subset)
         qwk_after = cohen_kappa_score(
-            y1=self.class_testing,
+            y1=self.testing_ys,
             y2=outputs_after,
             weights="quadratic",
         )
@@ -310,8 +277,8 @@ class FeatureSelector:
         # print("After: ", qwk_after)
 
         return {
-            "qwk_before_feature_classification": qwk_before,
-            "qwk_after_feature_classification": qwk_after,
+            "qwk_before": qwk_before,
+            "qwk_after": qwk_after,
         }
 
 
@@ -329,17 +296,20 @@ if __name__ == '__main__':
     for essay_set in essay_sets:
         print(f"essay set: {essay_set}")
         for model in models:
-            fs = FeatureSelector(
-                dtype="csv",
-                data_training_name="../data/data.1.csv",
-                class_training_name=None,
-                numberAnts=10,
-                iterations=50,
-                n_features=50,
+            feature_selector = ACOFeatureSelector(
+                fp_data=f"../data/data.{essay_set}.csv",
+                n_selected_features=50,
                 model_class=model,
+                n_ants=10,
+                n_iterations=50,
+                alpha=1,
+                beta=1,
+                q=1,
+                initial_pheromone=1.0,
+                rho=0.1,
             )
-
-            fs.acoFS()
-            qwks = fs.printTestingResults()
-            print(
-                f"{model.__name__}, \t before: {qwks['qwk_before_feature_classification']}, after: {qwks['qwk_after_feature_classification']}")
+            qwks = feature_selector.select_features()
+            print(f"\t[model] {model.__name__}")
+            print(f"\t[before] {qwks['qwk_before']}")
+            print(f"\t[after] {qwks['qwk_after']}")
+            print()
