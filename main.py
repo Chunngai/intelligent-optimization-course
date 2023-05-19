@@ -21,7 +21,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.tree import DecisionTreeClassifier
 from tqdm import tqdm
 
-from pathfinder.ant import Ant
+from ant import Ant
 
 np.set_printoptions(threshold=sys.maxsize)
 
@@ -285,8 +285,8 @@ class ACOFeatureSelector:
 if __name__ == '__main__':
     models = (
         GaussianNB,
-        KNeighborsClassifier,
-        DecisionTreeClassifier,
+        # KNeighborsClassifier,
+        # DecisionTreeClassifier,
         # LogisticRegression,
         # SVC,
         # SGDClassifier,
@@ -297,8 +297,8 @@ if __name__ == '__main__':
         print(f"essay set: {essay_set}")
         for model in models:
             feature_selector = ACOFeatureSelector(
-                fp_data=f"../data/data.{essay_set}.csv",
-                n_selected_features=50,
+                fp_data=f"data/data.{essay_set}.csv",
+                n_selected_features=30,
                 model_class=model,
                 n_ants=10,
                 n_iterations=50,
