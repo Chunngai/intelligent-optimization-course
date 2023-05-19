@@ -11,14 +11,28 @@ import numpy as np
 import pandas as pd
 import scipy.io as sp
 import time
+
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.feature_selection import SelectKBest
+from sklearn.linear_model import LogisticRegression, SGDClassifier
+from sklearn.metrics import cohen_kappa_score
+from sklearn.naive_bayes import GaussianNB, MultinomialNB
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import train_test_split
 from sklearn.feature_selection import f_classif
+from sklearn.svm import SVC
+from sklearn.tree import DecisionTreeClassifier
+from tqdm import tqdm
 from pathfinder.ant import Ant
 np.set_printoptions(threshold=sys.maxsize)
+
+
+def warn(*args, **kwargs):
+    pass
+import warnings
+warnings.warn = warn
 
  
 class FeatureSelector:
@@ -53,7 +67,7 @@ class FeatureSelector:
 
     """
 
-    def __init__(self, dtype="mat", data_training_name=None, class_training_name=None, numberAnts=1, iterations=1, n_features=1, data_testing_name=None, class_testing_name=None, alpha=1, beta=1, Q_constant=1, initialPheromone=1.0, evaporationRate=0.1):
+    def __init__(self, dtype="mat", data_training_name=None, class_training_name=None, numberAnts=1, iterations=1, n_features=1, data_testing_name=None, class_testing_name=None, alpha=1, beta=1, Q_constant=1, initialPheromone=1.0, evaporationRate=0.1, model_class=None):
         """Constructor method.
         """
         time_dataread_start = time.time()
@@ -74,6 +88,7 @@ class FeatureSelector:
 
         elif dtype=="csv":
             df = pd.read_csv(data_training_name)
+            df = df.loc[:, ~(df == df.iloc[0]).all()]  # Remove columns with identical values.
             df = df.to_numpy() 
             classes = df[:, -1].astype(int)
             df = np.delete(df, -1, 1)
@@ -109,6 +124,8 @@ class FeatureSelector:
         self.time_reset = 0
         self.time_localsearch = 0
         self.time_pheromonesupdate = 0
+
+        self.model_class = model_class
 
     def defineLUT(self):
         """Defines the Look-Up Table (LUT) for the algorithm.
@@ -150,7 +167,7 @@ class FeatureSelector:
             self.ants[i].feature_path.append(rand)
             actual_features_list = self.ants[i].feature_path                     
             actual_subset = np.array(self.data_training[:,actual_features_list])
-            actual_classifier = KNeighborsClassifier()
+            actual_classifier = self.model_class()
             actual_classifier.fit(actual_subset, self.class_training)
             scores = cross_val_score(actual_classifier, actual_subset, self.class_training, cv=5)
             actual_accuracy = scores.mean()
@@ -194,7 +211,7 @@ class FeatureSelector:
                 new_features_list = np.array(self.ants[index_ant].feature_path)
                 new_features_list = np.append(new_features_list,next_feature)
                 new_subset = np.array(self.data_training[:,new_features_list])
-                new_classifier = KNeighborsClassifier()
+                new_classifier = self.model_class()
                 new_classifier.fit(new_subset, self.class_training)
                 scores = cross_val_score(new_classifier, new_subset, self.class_training, cv=5)
                 new_accuracy = scores.mean()
@@ -236,7 +253,7 @@ class FeatureSelector:
         """
 
         self.defineLUT()
-        for c in range(self.iterations):
+        for c in tqdm(range(self.iterations)):
             self.resetInitialValues()
             #print("Colony", c, ":")
             ia = 0
@@ -251,22 +268,72 @@ class FeatureSelector:
     def printTestingResults(self):
         """Function for printing the entire summary of the algorithm, including the test results.
         """
-        print("The final subset of features is: ",self.ants[np.argmax(self.ant_accuracy)].feature_path)
-        print("Number of features: ",len(self.ants[np.argmax(self.ant_accuracy)].feature_path))
+        # print("The final subset of features is: ",self.ants[np.argmax(self.ant_accuracy)].feature_path)
+        # print("Number of features: ",len(self.ants[np.argmax(self.ant_accuracy)].feature_path))
+
+        model_before = self.model_class()
+        model_before.fit(self.data_training, self.class_training)
+        outputs_before = model_before.predict(self.data_testing)
+        qwk_before = cohen_kappa_score(
+            y1=self.class_testing,
+            y2=outputs_before,
+            weights="quadratic",
+        )
 
         data_training_subset = self.data_training[:,self.ants[np.argmax(self.ant_accuracy)].feature_path]
         data_testing_subset = self.data_testing[:,self.ants[np.argmax(self.ant_accuracy)].feature_path]
                 
-        print("Subset of features dataset accuracy:")
+        # print("Subset of features dataset accuracy:")
 
-        knn = KNeighborsClassifier()
-        knn.fit(data_training_subset, self.class_training)
-        knn_score = knn.score(data_testing_subset, self.class_testing) 
-        print("\t CV-Training set: ", np.max(self.ant_accuracy))
-        print("\t Testing set    : ", knn_score)
+        model_after = self.model_class()
+        model_after.fit(data_training_subset, self.class_training)
+        outputs_after = model_after.predict(data_testing_subset)
+        qwk_after = cohen_kappa_score(
+            y1=self.class_testing,
+            y2=outputs_after,
+            weights="quadratic",
+        )
+        # print("\t CV-Training set: ", np.max(self.ant_accuracy))
+        #
+        # print("\t Time elapsed reading data        : ", self.time_dataread)
+        # print("\t Time elapsed in LUT compute      : ", self.time_LUT)
+        # print("\t Time elapsed reseting values     : ", self.time_reset)
+        # print("\t Time elapsed in local search     : ", self.time_localsearch)
+        # print("\t Time elapsed updating pheromones : ", self.time_pheromonesupdate)
 
-        print("\t Time elapsed reading data        : ", self.time_dataread)
-        print("\t Time elapsed in LUT compute      : ", self.time_LUT)
-        print("\t Time elapsed reseting values     : ", self.time_reset)
-        print("\t Time elapsed in local search     : ", self.time_localsearch)
-        print("\t Time elapsed updating pheromones : ", self.time_pheromonesupdate)
+        # print("Before: ", qwk_before)
+        # print("After: ", qwk_after)
+
+        return {
+            "qwk_before_feature_classification": qwk_before,
+            "qwk_after_feature_classification": qwk_after,
+        }
+
+
+if __name__ == '__main__':
+    models = (
+        GaussianNB,
+        KNeighborsClassifier,
+        DecisionTreeClassifier,
+        # LogisticRegression,
+        # SVC,
+        # SGDClassifier,
+    )
+    essay_sets = range(1, 8 + 1)
+
+    for essay_set in essay_sets:
+        print(f"essay set: {essay_set}")
+        for model in models:
+            fs = FeatureSelector(
+                dtype="csv",
+                data_training_name="../data/data.1.csv",
+                class_training_name=None,
+                numberAnts=10,
+                iterations=50,
+                n_features=50,
+                model_class=model,
+            )
+
+            fs.acoFS()
+            qwks = fs.printTestingResults()
+            print(f"{model.__name__}, \t before: {qwks['qwk_before_feature_classification']}, after: {qwks['qwk_after_feature_classification']}")
