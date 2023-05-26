@@ -300,13 +300,13 @@ if __name__ == '__main__':
                 fp_data=f"data/data.{essay_set}.csv",
                 n_selected_features=30,
                 model_class=model,
-                n_ants=10,
-                n_iters=50,
+                n_ants=100,
+                n_iters=30,
                 alpha=1,
                 beta=1,
-                q=1,
+                q=3,
                 initial_pheromone=1.0,
-                rho=0.1,
+                rho=0.6,
             )
             qwks = feature_selector.select_features()
             print(f"\t[model] {model.__name__}")

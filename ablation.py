@@ -5,7 +5,7 @@ from sklearn.naive_bayes import GaussianNB
 
 from main import ACOFeatureSelector
 
-for i in range(5):
+for i in range(10):
     with open(f"ablation.{i}.csv", "w", encoding="utf-8") as f:
         csv_writer = csv.DictWriter(
             f,
@@ -13,46 +13,53 @@ for i in range(5):
         )
         csv_writer.writeheader()
 
-        for n_ants in [10, 20, 30]:
-            for n_iters in [10, 30, 50]:
-                for alpha in [1, 2, 3]:
-                    for beta in [1, 2, 3, 4, 5]:
-                        for q in [1, 2, 3]:
-                            for rho in [0.1, 0.3, 0.5, 0.7, 0.9]:
+        default_hyperparams = {
+            "n_ants": 10,
+            "n_iters": 10,
+            "alpha": 1,
+            "beta": 1,
+            "q": 1,
+            "rho": 0.1,
+        }
 
-                                line = {
-                                    "n_ants": n_ants,
-                                    "n_iters": n_iters,
-                                    "alpha": alpha,
-                                    "beta": beta,
-                                    "q": q,
-                                    "rho": rho,
-                                }
-                                print(line)
+        hyperparam_choices = {
+            "n_ants": range(10, 100 + 1, 10),
+            "n_iters": range(10, 100 + 1, 10),
+            "alpha": range(1, 5 + 1),
+            "beta": range(1, 5 + 1),
+            "q": range(1, 10 + 1),
+            "rho": list(map(lambda val: val / 10, range(1, 10, 1))),
+        }
 
-                                feature_selector = ACOFeatureSelector(
-                                    fp_data=f"data/data.1.csv",
-                                    n_selected_features=30,
-                                    model_class=GaussianNB,
-                                    initial_pheromone=1.0,
-                                    **line,
-                                )
+        for hyperparam, choices in hyperparam_choices.items():
+            for choice in choices:
+                d = dict(default_hyperparams)
+                d[hyperparam] = choice
+                print(d)
 
-                                try:
-                                    qwks = feature_selector.select_features()
-                                    print(f"\t[bfr] {qwks['qwk_before']}")
-                                    print(f"\t[aft] {qwks['qwk_after']}")
-                                    print(f"\t[dlt] {qwks['qwk_after'] - qwks['qwk_before']}")
-                                    print()
-                                except:
-                                    print(traceback.format_exc())
-                                    qwks = {
-                                        "qwk_before": float("nan"),
-                                        "qwk_after": float("nan"),
-                                    }
+                feature_selector = ACOFeatureSelector(
+                    fp_data=f"data/data.1.csv",
+                    n_selected_features=30,
+                    model_class=GaussianNB,
+                    initial_pheromone=1.0,
+                    **d,
+                )
 
-                                line["qwk_before"] = qwks["qwk_before"]
-                                line["qwk_after"] = qwks["qwk_after"]
-                                line["qwk_delta"] = qwks["qwk_after"] - qwks["qwk_before"]
+                try:
+                    qwks = feature_selector.select_features()
+                    print(f"\t[bfr] {qwks['qwk_before']}")
+                    print(f"\t[aft] {qwks['qwk_after']}")
+                    print(f"\t[dlt] {qwks['qwk_after'] - qwks['qwk_before']}")
+                    print()
+                except:
+                    print(traceback.format_exc())
+                    qwks = {
+                        "qwk_before": float("nan"),
+                        "qwk_after": float("nan"),
+                    }
 
-                                csv_writer.writerow(line)
+                d["qwk_before"] = qwks["qwk_before"]
+                d["qwk_after"] = qwks["qwk_after"]
+                d["qwk_delta"] = qwks["qwk_after"] - qwks["qwk_before"]
+
+                csv_writer.writerow(d)
