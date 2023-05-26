@@ -44,7 +44,7 @@ class ACOFeatureSelector:
     :param data_testing: Path to the testing data file (mat).
     :param class_testing: Path to the testing classes file (mat).
     :param n_ants: Number of ants of the colonies.
-    :param n_iterations: Number of colonies of the algorithm.
+    :param n_iters: Number of colonies of the algorithm.
     :param n_selected_features: Number of features to be selected.
     :param alpha: Parameter which determines the weight of tau.
     :param beta: Parameter which determines the weight of eta.
@@ -57,7 +57,7 @@ class ACOFeatureSelector:
     :type data_testing: Numpy array
     :type testing_ys: Numpy array
     :type n_ants: Integer
-    :type n_iterations: Integer
+    :type n_iters: Integer
     :type n_selected_features: Integer
     :type alpha: Float
     :type beta: Float
@@ -69,7 +69,7 @@ class ACOFeatureSelector:
 
     def __init__(
             self, fp_data: str, n_selected_features: int, model_class,
-            n_ants: int, n_iterations: int,
+            n_ants: int, n_iters: int,
             alpha: int = 1, beta: int = 1, q: int = 1, initial_pheromone: float = 1.0, rho: float = 0.1,
     ):
         # Read data.
@@ -102,7 +102,7 @@ class ACOFeatureSelector:
         self.model_class = model_class
 
         self.n_ants = n_ants
-        self.n_iterations = n_iterations
+        self.n_iters = n_iters
 
         self.alpha = alpha
         self.beta = beta
@@ -228,7 +228,7 @@ class ACOFeatureSelector:
 
     def select_features(self):
         self.define_lut()
-        for _ in tqdm(range(self.n_iterations)):
+        for _ in tqdm(range(self.n_iters)):
             self.reset_initial_values()
             for ant_index in range(self.n_ants):
                 self.ant_build_subset(ant_index)
@@ -301,7 +301,7 @@ if __name__ == '__main__':
                 n_selected_features=30,
                 model_class=model,
                 n_ants=10,
-                n_iterations=50,
+                n_iters=50,
                 alpha=1,
                 beta=1,
                 q=1,
