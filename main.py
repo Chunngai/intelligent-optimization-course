@@ -10,12 +10,12 @@ import sys
 
 import numpy as np
 import pandas as pd
+from scipy.stats import pearsonr
 from sklearn.feature_selection import SelectKBest
 from sklearn.feature_selection import f_classif
 from sklearn.metrics import cohen_kappa_score
 from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import train_test_split
-from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.tree import DecisionTreeClassifier
@@ -33,6 +33,27 @@ def warn(*args, **kwargs):
 import warnings
 
 warnings.warn = warn
+
+
+def exact_agreement(trgs, outs):
+    assert trgs.shape == outs.shape
+
+    n_match = np.sum(trgs == outs)
+    n_all = trgs.shape[0]
+
+    res = n_match / n_all
+    return res
+
+
+def adjacent_agreement(trgs, outs):
+    assert trgs.shape == outs.shape
+
+    differences = trgs - outs
+    n_match = np.sum((np.abs(differences) <= 1))
+    n_all = trgs.shape[0]
+
+    res = n_match / n_all
+    return res
 
 
 class ACOFeatureSelector:
@@ -240,53 +261,77 @@ class ACOFeatureSelector:
         """Function for printing the entire summary of the algorithm, including the test results.
         """
 
-        # print("The final subset of features is: ",self.ants[np.argmax(self.ant_accuracy)].feature_path)
-        # print("Number of features: ",len(self.ants[np.argmax(self.ant_accuracy)].feature_path))
+        selected_features = self.ants[np.argmax(self.ant_accuracy_list)].feature_path
+        # print("The final subset of features is: ", selected_features)
+        # print("Number of features: ", len(selected_features))
 
         model_before = self.model_class()
         model_before.fit(self.training_xs, self.training_ys)
         outputs_before = model_before.predict(self.testing_xs)
+
+        exact_agreement_before = exact_agreement(
+            trgs=self.testing_ys,
+            outs=outputs_before,
+        )
+        adjacent_agreement_before = adjacent_agreement(
+            trgs=self.testing_ys,
+            outs=outputs_before,
+        )
         qwk_before = cohen_kappa_score(
             y1=self.testing_ys,
             y2=outputs_before,
             weights="quadratic",
         )
+        correlation_before = pearsonr(
+            x=self.testing_ys,
+            y=outputs_before,
+        )[0]
 
         data_training_subset = self.training_xs[:, self.ants[np.argmax(self.ant_accuracy_list)].feature_path]
         data_testing_subset = self.testing_xs[:, self.ants[np.argmax(self.ant_accuracy_list)].feature_path]
 
-        # print("Subset of features dataset accuracy:")
-
         model_after = self.model_class()
         model_after.fit(data_training_subset, self.training_ys)
         outputs_after = model_after.predict(data_testing_subset)
+
+        exact_agreement_after = exact_agreement(
+            trgs=self.testing_ys,
+            outs=outputs_after,
+        )
+        adjacent_agreement_after = adjacent_agreement(
+            trgs=self.testing_ys,
+            outs=outputs_after,
+        )
         qwk_after = cohen_kappa_score(
             y1=self.testing_ys,
             y2=outputs_after,
             weights="quadratic",
         )
-        # print("\t CV-Training set: ", np.max(self.ant_accuracy))
-        #
-        # print("\t Time elapsed reading data        : ", self.time_dataread)
-        # print("\t Time elapsed in LUT compute      : ", self.time_LUT)
-        # print("\t Time elapsed reseting values     : ", self.time_reset)
-        # print("\t Time elapsed in local search     : ", self.time_localsearch)
-        # print("\t Time elapsed updating pheromones : ", self.time_pheromonesupdate)
-
-        # print("Before: ", qwk_before)
-        # print("After: ", qwk_after)
+        correlation_after = pearsonr(
+            x=self.testing_ys,
+            y=outputs_after,
+        )[0]
 
         return {
             "qwk_before": qwk_before,
+            "exact_agreement_before": exact_agreement_before,
+            "adjacent_agreement_before": adjacent_agreement_before,
+            "correlation_before": correlation_before,
+
             "qwk_after": qwk_after,
+            "exact_agreement_after": exact_agreement_after,
+            "adjacent_agreement_after": adjacent_agreement_after,
+            "correlation_after": correlation_after,
+
+            "selected_features": selected_features,
         }
 
 
 if __name__ == '__main__':
     models = (
-        GaussianNB,
-        # KNeighborsClassifier,
-        # DecisionTreeClassifier,
+        # GaussianNB,
+        KNeighborsClassifier,  # 30 ants
+        DecisionTreeClassifier,  # 30 ants
         # LogisticRegression,
         # SVC,
         # SGDClassifier,
@@ -296,20 +341,40 @@ if __name__ == '__main__':
     for essay_set in essay_sets:
         print(f"essay set: {essay_set}")
         for model in models:
-            feature_selector = ACOFeatureSelector(
-                fp_data=f"data/data.{essay_set}.csv",
-                n_selected_features=30,
-                model_class=model,
-                n_ants=100,
-                n_iters=30,
-                alpha=1,
-                beta=1,
-                q=3,
-                initial_pheromone=1.0,
-                rho=0.6,
-            )
-            qwks = feature_selector.select_features()
-            print(f"\t[model] {model.__name__}")
-            print(f"\t[before] {qwks['qwk_before']}")
-            print(f"\t[after] {qwks['qwk_after']}")
-            print()
+
+            rst_dicts = {}
+            for i in range(3):
+                feature_selector = ACOFeatureSelector(
+                    fp_data=f"data/data.{essay_set}.csv",
+                    n_selected_features=30,
+                    model_class=model,
+                    n_ants=20,
+                    n_iters=30,
+                    alpha=1,
+                    beta=1,
+                    q=3,
+                    initial_pheromone=1.0,
+                    rho=0.6,
+                )
+                rst_dict = feature_selector.select_features()
+                print(f"\t[mdl] {model.__name__}")
+                print(
+                    f"\t[bfr] "
+                    f"qwk={rst_dict['qwk_before']:.2f}, "
+                    f"ea={rst_dict['exact_agreement_before']:.2f}, "
+                    f"aa={rst_dict['adjacent_agreement_before']:.2f}, "
+                    f"corr={rst_dict['correlation_before']:.2f}"
+                )
+                print(
+                    f"\t[aft] "
+                    f"qwk={rst_dict['qwk_after']:.2f}, "
+                    f"ea={rst_dict['exact_agreement_after']:.2f}, "
+                    f"aa={rst_dict['adjacent_agreement_after']:.2f}, "
+                    f"corr={rst_dict['correlation_after']:.2f}"
+                )
+                print()
+
+                rst_dicts[i] = rst_dict
+
+            with open(f"{essay_set}_{model.__name__}.txt", "w", encoding="utf-8") as f:
+                f.write(str(rst_dicts))
