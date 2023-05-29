@@ -46,7 +46,7 @@ def visualize(var_idx: int, start_line_idx: int, end_line_idx: int, var_name: st
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
     plt.ylim(0.05, 0.11)
-    plt.savefig(f"ablation_{var_name}.png")
+    plt.savefig(f"ablation/ablation_{var_name}.png")
 
 
 visualize(

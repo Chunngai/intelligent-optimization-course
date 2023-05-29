@@ -16,9 +16,8 @@ from sklearn.feature_selection import f_classif
 from sklearn.metrics import cohen_kappa_score
 from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import train_test_split
-from sklearn.neighbors import KNeighborsClassifier
+from sklearn.naive_bayes import GaussianNB
 from sklearn.preprocessing import StandardScaler
-from sklearn.tree import DecisionTreeClassifier
 from tqdm import tqdm
 
 from ant import Ant
@@ -95,7 +94,7 @@ class ACOFeatureSelector:
     ):
         # Read data.
         df = pd.read_csv(fp_data)
-        df = df.loc[:, ~(df == df.iloc[0]).all()]  # Remove columns with identical values.
+        df = df.loc[:, ~(df == df.iloc[0]).all()]  # Remove columns with identical values (0, 4, 43, 44).
         df = df.to_numpy()
         classes = df[:, -1].astype(int)
         df = np.delete(df, -1, 1)
@@ -133,7 +132,6 @@ class ACOFeatureSelector:
 
         self.ants = None
         self.ant_accuracy_list = np.zeros(self.n_ants)
-        self.unvisited_feature_indexes = None
 
         self.feature_pheromone = np.full(self.n_all_features, self.initial_pheromone)
 
@@ -197,30 +195,30 @@ class ACOFeatureSelector:
             all_feature_indexes,
             self.ants[index_ant].feature_path
         ))[0]
-        self.unvisited_feature_indexes = np.delete(all_feature_indexes, visited_feature_indexes)
+        unvisited_feature_indixes = np.delete(all_feature_indexes, visited_feature_indexes)
 
         self.define_lut()
 
         for n in range(self.n_selected_features):
             # Compute eta, tau and the numerator for each unvisited feature
-            probs = np.zeros(np.size(self.unvisited_feature_indexes))
-            for unvisited_feature_index in range(len(self.unvisited_feature_indexes)):
-                eta = self.lut[self.unvisited_feature_indexes[unvisited_feature_index]]
+            probs = np.zeros(np.size(unvisited_feature_indixes))
+            for unvisited_feature_index in range(len(unvisited_feature_indixes)):
+                eta = self.lut[unvisited_feature_indixes[unvisited_feature_index]]
                 tau = self.feature_pheromone[unvisited_feature_index]
 
                 np.put(probs, unvisited_feature_index, (tau ** self.alpha) * (eta ** self.beta))
 
             sum_ = np.sum(probs)
-            for unvisited_feature_index in range(len(self.unvisited_feature_indexes)):
+            for unvisited_feature_index in range(len(unvisited_feature_indixes)):
                 probs[unvisited_feature_index] = probs[unvisited_feature_index] / sum_
-            next_feature = np.random.choice(self.unvisited_feature_indexes, 1, p=probs)[0]
+            next_feature = np.random.choice(unvisited_feature_indixes, 1, p=probs)[0]
 
             # Choose the feature with best probability and add to the ant subset
             self.ants[index_ant].feature_path.append(next_feature)
             # Remove the chosen feature of the unvisited features
-            self.unvisited_feature_indexes = np.delete(
-                self.unvisited_feature_indexes,
-                np.where(self.unvisited_feature_indexes == next_feature)
+            unvisited_feature_indixes = np.delete(
+                unvisited_feature_indixes,
+                np.where(unvisited_feature_indixes == next_feature)
             )
 
             self.redefine_lut(next_feature)
@@ -329,9 +327,9 @@ class ACOFeatureSelector:
 
 if __name__ == '__main__':
     models = (
-        # GaussianNB,
-        KNeighborsClassifier,  # 30 ants
-        DecisionTreeClassifier,  # 30 ants
+        GaussianNB,
+        # KNeighborsClassifier,  # 30 ants
+        # DecisionTreeClassifier,  # 30 ants
         # LogisticRegression,
         # SVC,
         # SGDClassifier,
