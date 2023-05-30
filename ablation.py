@@ -39,9 +39,9 @@ for i in range(10):
 
                 feature_selector = ACOFeatureSelector(
                     fp_data=f"data/data.1.csv",
-                    n_selected_features=30,
+                    n_features_to_select=30,
                     model_class=GaussianNB,
-                    initial_pheromone=1.0,
+                    mu=1.0,
                     **d,
                 )
 
